@@ -6,12 +6,18 @@ package org.openintegrationengine.connectors.sftp.server;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.apache.sshd.common.AttributeRepository;
 import org.apache.sshd.common.config.keys.AuthorizedKeyEntry;
 import org.apache.sshd.common.config.keys.KeyUtils;
 import org.apache.sshd.common.config.keys.PublicKeyEntryResolver;
 import org.apache.sshd.common.file.virtualfs.VirtualFileSystemFactory;
+import org.apache.sshd.common.util.buffer.Buffer;
 import org.apache.sshd.core.CoreModuleProperties;
 import org.apache.sshd.server.SshServer;
+import org.apache.sshd.server.auth.UserAuthFactory;
+import org.apache.sshd.server.auth.password.UserAuthPasswordFactory;
+import org.apache.sshd.server.auth.pubkey.UserAuthPublicKey;
+import org.apache.sshd.server.auth.pubkey.UserAuthPublicKeyFactory;
 import org.apache.sshd.server.keyprovider.SimpleGeneratorHostKeyProvider;
 import org.apache.sshd.server.session.ServerSession;
 import org.apache.sshd.sftp.server.FileHandle;
@@ -32,6 +38,7 @@ import java.security.MessageDigest;
 import java.security.PublicKey;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -67,6 +74,17 @@ import java.util.Set;
 public class EmbeddedSftpServer {
 
     private static final Logger logger = LogManager.getLogger(EmbeddedSftpServer.class);
+
+    /*
+     * For an account that must present both a key and a password: the username whose key
+     * this session has proved, and the username whose password it has. Holding the name
+     * rather than a flag means a client that switches usernames between attempts gets no
+     * credit for the first one.
+     */
+    private static final AttributeRepository.AttributeKey<String> KEY_PASSED =
+            new AttributeRepository.AttributeKey<String>();
+    private static final AttributeRepository.AttributeKey<String> PASSWORD_PASSED =
+            new AttributeRepository.AttributeKey<String>();
 
     /** Called on the client's own session thread as each upload completes. */
     public interface UploadHandler {
@@ -134,6 +152,10 @@ public class EmbeddedSftpServer {
         // Anything not explicitly configured is refused: no keyboard-interactive, no GSS,
         // no host-based.
         sshd.setKeyboardInteractiveAuthenticator(null);
+        // Listed explicitly so that the public key method is ours -- see
+        // SecondFactorPublicKeyFactory -- and nothing else is offered.
+        sshd.setUserAuthFactories(Arrays.<UserAuthFactory>asList(
+                new SecondFactorPublicKeyFactory(), UserAuthPasswordFactory.INSTANCE));
 
         VirtualFileSystemFactory fileSystemFactory = new VirtualFileSystemFactory(settings.rootDirectory);
         for (SftpServerUser user : settings.users) {
@@ -237,8 +259,9 @@ public class EmbeddedSftpServer {
                 password == null ? new byte[0] : password.getBytes(StandardCharsets.UTF_8));
         if (!ok) {
             logger.warn("SFTP password authentication failed for \"{}\" from {}", username, remoteAddress(session));
+            return false;
         }
-        return ok;
+        return completeLogin(username, session, PASSWORD_PASSED, KEY_PASSED, "password", "public key");
     }
 
     private boolean authenticatePublicKey(String username, PublicKey key, ServerSession session) {
@@ -255,6 +278,61 @@ public class EmbeddedSftpServer {
         logger.warn("SFTP public key authentication failed for \"{}\" from {} (key {})",
                 username, remoteAddress(session), KeyUtils.getKeyType(key));
         return false;
+    }
+
+    /**
+     * Called once a credential has passed. An account that needs only one is logged in
+     * there and then. One that needs both is logged in only if the other credential
+     * already passed in this session; otherwise this one is recorded and the attempt is
+     * refused, so the client goes on to offer the other.
+     *
+     * <p>The refusal is an ordinary failure, not SSH's "partial success": MINA decides
+     * which method combinations it requires once per server, before any username is
+     * known, so a per-account requirement has to be enforced here. Clients try their next
+     * method either way; the only visible difference is a verbose client log reporting
+     * the first credential as rejected.
+     */
+    private boolean completeLogin(String username, ServerSession session,
+            AttributeRepository.AttributeKey<String> passed, AttributeRepository.AttributeKey<String> other,
+            String method, String otherMethod) {
+        SftpServerUser user = findUser(username);
+        if (user == null || !user.isRequireKeyAndPassword()) {
+            return true;
+        }
+        if (username.equals(session.getAttribute(other))) {
+            return true;
+        }
+        session.setAttribute(passed, username);
+        logger.info("SFTP {} accepted for \"{}\" from {}; the account also requires a {}",
+                method, username, remoteAddress(session), otherMethod);
+        return false;
+    }
+
+    /**
+     * MINA's public key method, with the key-and-password rule applied once the key is
+     * proven.
+     *
+     * <p>The rule cannot live in {@link #authenticatePublicKey}: MINA calls that for a
+     * client merely asking whether a key would be accepted, before any signature, and a
+     * public key is public. Crediting the key there would let anyone holding it skip that
+     * half. {@code doAuth} returns {@code TRUE} only after the client's signature over the
+     * session has verified, so that is where the key counts.
+     */
+    private final class SecondFactorPublicKeyFactory extends UserAuthPublicKeyFactory {
+        @Override
+        public UserAuthPublicKey createUserAuth(ServerSession session) throws IOException {
+            return new UserAuthPublicKey(getSignatureFactories()) {
+                @Override
+                public Boolean doAuth(Buffer buffer, boolean init) throws Exception {
+                    Boolean result = super.doAuth(buffer, init);
+                    if (!Boolean.TRUE.equals(result)) {
+                        return result;
+                    }
+                    return completeLogin(getUsername(), getServerSession(),
+                            KEY_PASSED, PASSWORD_PASSED, "public key", "password");
+                }
+            };
+        }
     }
 
     private static String remoteAddress(ServerSession session) {

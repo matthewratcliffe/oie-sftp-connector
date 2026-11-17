@@ -217,6 +217,11 @@ public class SftpReceiver extends PollConnector {
                 throw new ConnectorTaskException("SFTP server user \"" + username
                         + "\" has neither a password nor an authorized key, so nothing could log in as it.");
             }
+            if (user.isRequireKeyAndPassword()
+                    && (StringUtils.isEmpty(user.getPassword()) || StringUtils.isBlank(user.getAuthorizedKeys()))) {
+                throw new ConnectorTaskException("SFTP server user \"" + username
+                        + "\" requires a key and a password but does not have both, so nothing could log in as it.");
+            }
         }
     }
 

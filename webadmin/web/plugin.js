@@ -278,7 +278,8 @@ export function register(platform) {
             password: '',
             authorizedKeys: '',
             homeDirectory: '',
-            readOnly: false
+            readOnly: false,
+            requireKeyAndPassword: false
         };
     }
 
@@ -327,6 +328,15 @@ export function register(platform) {
                     type: 'checkbox', checked: !!user.readOnly,
                     onChange: (e) => update(index, 'readOnly', e.target.checked)
                 }), 'Read only'),
+            h('label', {
+                className: 'check',
+                title: 'Require one of the authorized keys and the password in the same session,'
+                    + ' instead of either one.'
+            },
+                h('input', {
+                    type: 'checkbox', checked: asBool(user.requireKeyAndPassword),
+                    onChange: (e) => update(index, 'requireKeyAndPassword', e.target.checked)
+                }), 'Key + password'),
             h('button', {
                 type: 'button', className: 'btn',
                 title: 'Edit this account’s authorized keys',
@@ -349,7 +359,8 @@ export function register(platform) {
             h('div', { className: 'hint mb-1.5' },
                 'An account with no password refuses password authentication, and one with no'
                 + ' authorized key refuses public key authentication. An account with neither cannot'
-                + ' be logged into at all, and the channel refuses to deploy.'),
+                + ' be logged into at all, and the channel refuses to deploy. "Key + password" requires'
+                + ' both in the same session instead of either one, so the account needs both set.'),
             rows,
             h('div', { className: 'mt-1.5' },
                 h('button', {
@@ -555,6 +566,14 @@ export function register(platform) {
                     if (!String(user.password || '') && !String(user.authorizedKeys || '').trim()) {
                         errors.push('User "' + (user.username || '')
                             + '" has neither a password nor an authorized key, so nothing could log in as it.');
+                        break;
+                    }
+                }
+                for (const user of users) {
+                    if (asBool(user.requireKeyAndPassword)
+                        && (!String(user.password || '') || !String(user.authorizedKeys || '').trim())) {
+                        errors.push('User "' + (user.username || '')
+                            + '" requires a key and a password but does not have both.');
                         break;
                     }
                 }

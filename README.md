@@ -61,6 +61,16 @@ with no authorized key refuses public key authentication. A user with neither
 cannot be logged into at all, and the channel refuses to deploy rather than
 pretending to work until a partner tries to connect.
 
+**Key and password.** Tick *Key + Password* on an account to require both in the
+same session, in either order, instead of either one; other accounts are
+unaffected. The account needs a password and at least one authorized key, or the
+channel refuses to deploy. The first credential is answered with an ordinary
+failure rather than SSH's "partial success" — the SSH library fixes the required
+methods server-wide, so a per-account rule is enforced by the plugin — which
+OpenSSH, WinSCP, FileZilla and JSch all handle by offering the next one. A
+verbose client log will show the first credential as rejected; the engine logs
+it as accepted, with the second still required.
+
 **Secrets.** Channel XML is not an encrypted store. Put the password in the
 configuration map and reference it by its bare key — `${partnerPassword}`, not
 `${configurationMap.partnerPassword}` — and it stays out of git and is expanded
