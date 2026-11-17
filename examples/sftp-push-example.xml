@@ -63,6 +63,7 @@
             <authorizedKeys></authorizedKeys>
             <homeDirectory>incoming</homeDirectory>
             <readOnly>false</readOnly>
+            <requireKeyAndPassword>false</requireKeyAndPassword>
           </org.openintegrationengine.connectors.sftp.SftpServerUser>
         </users>
         <hostKeyFile>sftp/hostkey.ser</hostKeyFile>

@@ -131,10 +131,10 @@ public class SftpListenerPanel extends ConnectorSettingsPanel {
                 "<html>Picks up an upload that arrived while the channel was stopped.<br>"
                         + "Only safe with an after-processing action of Delete or Move -- with None it re-sends everything on every deploy.</html>");
 
-        usersModel = new DefaultTableModel(new Object[] {"Username", "Password", "Home Directory", "Read Only"}, 0) {
+        usersModel = new DefaultTableModel(new Object[] {"Username", "Password", "Home Directory", "Read Only", "Key + Password"}, 0) {
             @Override
             public Class<?> getColumnClass(int column) {
-                return column == 3 ? Boolean.class : String.class;
+                return column == 3 || column == 4 ? Boolean.class : String.class;
             }
         };
         usersModel.addTableModelListener(e -> PanelSupport.markDirty());
@@ -142,7 +142,8 @@ public class SftpListenerPanel extends ConnectorSettingsPanel {
         usersTable.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         usersTable.getSelectionModel().addListSelectionListener(e -> syncAuthorizedKeys());
         usersTable.setToolTipText("<html>The accounts the SFTP server accepts. A user with no password refuses"
-                + " password authentication;<br>a user with no authorized key refuses public key authentication.</html>");
+                + " password authentication;<br>a user with no authorized key refuses public key authentication.<br>"
+                + "Key + Password requires both in the same session instead of either one.</html>");
 
         authorizedKeysArea = PanelSupport.textArea(4, 40,
                 "<html>Authorized keys for the selected user, one per line, exactly as they would appear<br>"
@@ -254,7 +255,7 @@ public class SftpListenerPanel extends ConnectorSettingsPanel {
         usersButtons.setBackground(UIConstants.BACKGROUND_COLOR);
         JButton addUser = new JButton("New");
         addUser.addActionListener(e -> {
-            usersModel.addRow(new Object[] {"user" + (usersModel.getRowCount() + 1), "", "", Boolean.FALSE});
+            usersModel.addRow(new Object[] {"user" + (usersModel.getRowCount() + 1), "", "", Boolean.FALSE, Boolean.FALSE});
             authorizedKeysByRow.add("");
             usersTable.setRowSelectionInterval(usersModel.getRowCount() - 1, usersModel.getRowCount() - 1);
             PanelSupport.markDirty();
@@ -456,6 +457,7 @@ public class SftpListenerPanel extends ConnectorSettingsPanel {
             user.setPassword(StringUtils.defaultString((String) usersModel.getValueAt(row, 1)));
             user.setHomeDirectory(StringUtils.defaultString((String) usersModel.getValueAt(row, 2)));
             user.setReadOnly(Boolean.TRUE.equals(usersModel.getValueAt(row, 3)));
+            user.setRequireKeyAndPassword(Boolean.TRUE.equals(usersModel.getValueAt(row, 4)));
             user.setAuthorizedKeys(row < authorizedKeysByRow.size() ? authorizedKeysByRow.get(row) : "");
             users.add(user);
         }
@@ -487,7 +489,8 @@ public class SftpListenerPanel extends ConnectorSettingsPanel {
         if (properties.getUsers() != null) {
             for (SftpServerUser user : properties.getUsers()) {
                 usersModel.addRow(new Object[] {user.getUsername(), user.getPassword(),
-                        user.getHomeDirectory(), Boolean.valueOf(user.isReadOnly())});
+                        user.getHomeDirectory(), Boolean.valueOf(user.isReadOnly()),
+                        Boolean.valueOf(user.isRequireKeyAndPassword())});
                 authorizedKeysByRow.add(StringUtils.defaultString(user.getAuthorizedKeys()));
             }
         }
@@ -543,15 +546,18 @@ public class SftpListenerPanel extends ConnectorSettingsPanel {
                 }
             }
             /*
-             * An account with neither a password nor a key cannot be logged into, which is
-             * always a mistake and one that otherwise only shows up when a partner tries to
+             * An account with neither a password nor a key cannot be logged into -- nor can one
+             * that requires both and lacks either -- which is always a mistake and one that otherwise only shows up when a partner tries to
              * connect. The server refuses to deploy on it, so the panel refuses to save it.
              */
             boolean usersValid = !properties.getUsers().isEmpty();
             for (SftpServerUser user : properties.getUsers()) {
                 if (StringUtils.isBlank(user.getUsername())
                         || (StringUtils.isEmpty(user.getPassword())
-                                && StringUtils.isBlank(user.getAuthorizedKeys()))) {
+                                && StringUtils.isBlank(user.getAuthorizedKeys()))
+                        || (user.isRequireKeyAndPassword()
+                                && (StringUtils.isEmpty(user.getPassword())
+                                        || StringUtils.isBlank(user.getAuthorizedKeys())))) {
                     usersValid = false;
                 }
             }

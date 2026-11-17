@@ -18,6 +18,10 @@ import java.util.Map;
  * empty is rejected at deploy time rather than silently creating an account that nothing
  * can log into -- or, worse, one that anything can.
  *
+ * <p>{@link #isRequireKeyAndPassword() requireKeyAndPassword} turns "either" into "both":
+ * the account must present one of its authorized keys and its password in the same
+ * session, in either order. Such an account needs both configured.
+ *
  * <p>The password is held as typed. Channel XML is not an encrypted store, so the useful
  * pattern is a configuration map reference by its bare key -- {@code ${partnerPassword}},
  * not {@code ${configurationMap.partnerPassword}}, which is the JavaScript API's form and
@@ -31,6 +35,7 @@ public class SftpServerUser implements Serializable {
     private String authorizedKeys;
     private String homeDirectory;
     private boolean readOnly;
+    private boolean requireKeyAndPassword;
 
     public SftpServerUser() {
         username = "";
@@ -38,6 +43,7 @@ public class SftpServerUser implements Serializable {
         authorizedKeys = "";
         homeDirectory = "";
         readOnly = false;
+        requireKeyAndPassword = false;
     }
 
     public SftpServerUser(SftpServerUser props) {
@@ -46,6 +52,7 @@ public class SftpServerUser implements Serializable {
         authorizedKeys = props.getAuthorizedKeys();
         homeDirectory = props.getHomeDirectory();
         readOnly = props.isReadOnly();
+        requireKeyAndPassword = props.isRequireKeyAndPassword();
     }
 
     public String getUsername() {
@@ -98,6 +105,19 @@ public class SftpServerUser implements Serializable {
         this.readOnly = readOnly;
     }
 
+    /**
+     * Require an authorized key <em>and</em> the password, rather than either one. Off by
+     * default, and absent from channels saved before it existed, which therefore load with
+     * it off and behave exactly as they did.
+     */
+    public boolean isRequireKeyAndPassword() {
+        return requireKeyAndPassword;
+    }
+
+    public void setRequireKeyAndPassword(boolean requireKeyAndPassword) {
+        this.requireKeyAndPassword = requireKeyAndPassword;
+    }
+
     @Override
     public boolean equals(Object obj) {
         return EqualsBuilder.reflectionEquals(this, obj);
@@ -118,6 +138,7 @@ public class SftpServerUser implements Serializable {
         purged.put("authorizedKeysSet", authorizedKeys != null && !authorizedKeys.trim().isEmpty());
         purged.put("scopedHome", homeDirectory != null && !homeDirectory.trim().isEmpty());
         purged.put("readOnly", readOnly);
+        purged.put("requireKeyAndPassword", requireKeyAndPassword);
         return purged;
     }
 }
